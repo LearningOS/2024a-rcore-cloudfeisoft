@@ -22,6 +22,14 @@ use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
+use crate::timer::get_time_ms;
+
+use crate::{
+    config::MAX_SYSCALL_NUM,
+    //task::{add_syscall_count},
+    //timer::get_time_us,
+};
+
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -54,6 +62,8 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            firsttime:0,
+            syscall_times:[0;MAX_SYSCALL_NUM],
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -80,6 +90,9 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
+        task0.firsttime=get_time_ms();//tjy
+        //println!("[kernel] firsttime {}",task0.firsttime);
+
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -122,6 +135,12 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            if inner.tasks[next].firsttime==0
+            {
+                inner.tasks[next].firsttime=get_time_ms();//tjy
+                //println!("[kernel] firsttime {}",inner.tasks[next].firsttime);
+
+            }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -134,6 +153,30 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+
+    fn get_first_time(&self)->usize
+    {
+        let  inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+
+        inner.tasks[current].firsttime
+    }
+
+    fn add_syscall_count(&self,syscall_id: usize)->usize
+    {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+
+        inner.tasks[current].syscall_times[syscall_id]=inner.tasks[current].syscall_times[syscall_id]+1;
+        0
+    }
+    fn get_syscall_times(&self)->[u32; MAX_SYSCALL_NUM]
+    {
+        let  inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+
+        inner.tasks[current].syscall_times
     }
 }
 
@@ -168,4 +211,19 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+//tjy
+/// get_first_time .
+pub fn get_first_time()->usize {
+    TASK_MANAGER.get_first_time()
+}
+/// add_syscall_count
+pub fn add_syscall_count(syscall_id: usize)->usize {
+    TASK_MANAGER.add_syscall_count(syscall_id)
+}  
+/// get_syscall_times
+pub fn get_syscall_times()->[u32; MAX_SYSCALL_NUM]
+{
+    TASK_MANAGER.get_syscall_times()
 }
